@@ -1,0 +1,35 @@
+# ===== Data (KHÔNG commit, file quá nặng, GitHub giới hạn 100MB/file) =====
+data/raw/
+data/processed/
+*.csv
+*.zip
+*.parquet
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ===== Model / output lớn =====
+*.pkl
+*.joblib
+*.h5
+reports/figures/*.png
+!reports/figures/.gitkeep
+
+# ===== Kaggle credentials (TUYỆT ĐỐI không commit) =====
+kaggle.json
