@@ -173,8 +173,8 @@ website.
 
 | Deadline           | Việc cần xong                                                                                                      | Ai chịu trách nhiệm                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| **CN 15/11**       | Mỗi người tự setup xong môi trường (clone repo, add data Kaggle, chạy thử `load_data()` với sample nhỏ thành công) | Cả 3 người                                |
-| **Thứ 5 19/11**    | A xong EDA + tiền xử lý, push `data/processed/train_clean.csv` kèm code lên nhánh, tạo PR                          | A                                         |
+| **T7 14/11**       | Mỗi người tự setup xong môi trường (clone repo, add data Kaggle, chạy thử `load_data()` với sample nhỏ thành công) | Cả 3 người                                |
+| **Thứ 4 18/11**    | A xong EDA + tiền xử lý, push `data/processed/train_clean.csv` kèm code lên nhánh, tạo PR                          | A                                         |
 | **CN 22/11**       | B xong training + so sánh các model, có bảng kết quả Precision/Recall/F1/PR-AUC                                    | B (bắt đầu từ 19/11 khi có data sạch)     |
 | **Thứ 4 25/11**    | C xong SHAP + phân tích + ràng buộc bổ sung, có bản nháp báo cáo Word                                              | C (bắt đầu từ 22/11 khi có kết quả model) |
 | **Thứ 7 28/11**    | Nhóm trưởng review toàn bộ, merge hết PR vào `main`, hoàn thiện báo cáo Word, chốt bản cuối                        | Nhóm trưởng + cả 3                        |
