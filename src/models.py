@@ -382,11 +382,12 @@ def compare_models(
     models_dict: Dict[str, Any],
     X_test: pd.DataFrame,
     y_test: pd.Series,
-    threshold: float = 0.5
+    threshold: Any = "youden"
 ) -> pd.DataFrame:
     """
     So sánh toàn bộ các mô hình trên tập Test theo các chỉ số:
     PR-AUC, ROC-AUC, F1-score, Precision, Recall, Accuracy.
+    Hỗ trợ threshold='youden' để áp dụng ngưỡng tối ưu Youden's J Statistic cho từng mô hình.
     
     Trả về DataFrame sắp xếp theo PR-AUC giảm dần.
     """
@@ -404,7 +405,7 @@ def compare_models(
 
     df_results = pd.DataFrame(results)
     if not df_results.empty:
-        cols_order = ["Model", "PR-AUC", "ROC-AUC", "F1-score", "Precision", "Recall", "Accuracy", "TP", "FP", "FN", "TN"]
+        cols_order = ["Model", "Threshold", "PR-AUC", "ROC-AUC", "F1-score", "Precision", "Recall", "Accuracy", "TP", "FP", "FN", "TN"]
         df_results = df_results[[c for c in cols_order if c in df_results.columns]]
         df_results = df_results.sort_values(by="PR-AUC", ascending=False).reset_index(drop=True)
 
@@ -491,41 +492,90 @@ def get_feature_importances(
 
 
 # ==============================================================================
-# 5. TEST CHẠY THỬ ĐƠN VỊ KHI GỌI TRỰC TIẾP (UNIT TEST WITH MOCK DATA)
+# 5. TEST CHẠY THỬ ĐƠN VỊ KHI GỌI TRỰC TIẾP (UNIT TEST VỚI DỮ LIỆU THẬT)
 # ==============================================================================
 
 if __name__ == "__main__":
-    print("=== ĐANG CHẠY TEST KIỂM THỬ TẤT CẢ HÀM TRONG src/models.py VỚI DỮ LIỆU GIẢ LẬP ===")
-    
-    # 1. Tạo tập dữ liệu giả lập mô phỏng IEEE-CIS Fraud Detection (Mất cân bằng lớp 3.5%)
-    np.random.seed(42)
-    n_samples = 2000
-    n_features = 20
-    
-    X_mock = pd.DataFrame(
-        np.random.randn(n_samples, n_features),
-        columns=[f"feat_{i}" for i in range(n_features)]
+    import sys
+    print("=== ĐANG CHẠY TEST KIỂM THỬ TẤT CẢ HÀM TRONG src/models.py ===")
+
+    # 1. Nạp mẫu dữ liệu thật từ data/processed hoặc data/raw
+    processed_candidates = ["data/processed", "../data/processed", "."]
+    proc_dir = next(
+        (p for p in processed_candidates if os.path.exists(os.path.join(p, "train_clean.csv"))),
+        None
     )
-    # Thêm một vài giá trị NaN để kiểm tra khả năng chịu lỗi
-    X_mock.iloc[::20, 0] = np.nan
-    X_mock.iloc[::15, 3] = np.nan
-    
-    # 3.5% gian lận
-    y_mock = pd.Series((np.random.rand(n_samples) < 0.035).astype(int), name="isFraud")
-    print(f"Dữ liệu test: {X_mock.shape}, Số ca gian lận: {y_mock.sum()} ({y_mock.mean():.2%})")
 
-    # Chia train/test
-    split_idx = int(n_samples * 0.7)
-    X_tr, X_te = X_mock.iloc[:split_idx], X_mock.iloc[split_idx:]
-    y_tr, y_te = y_mock.iloc[:split_idx], y_mock.iloc[split_idx:]
+    if proc_dir:
+        print(f"[models.py] Đang nạp mẫu dữ liệu THẬT đã tiền xử lý từ: {proc_dir} (nrows=5000)")
+        train_df = pd.read_csv(os.path.join(proc_dir, "train_clean.csv"), nrows=5000)
+        val_df = pd.read_csv(os.path.join(proc_dir, "val_clean.csv"), nrows=1500)
+        test_df = pd.read_csv(os.path.join(proc_dir, "test_clean.csv"), nrows=1500)
+    else:
+        # Nếu chưa có thư mục processed, thử gọi pipeline tiền xử lý trên data/raw
+        raw_candidates = ["data/raw", "../data/raw", "/kaggle/input/competitions/ieee-fraud-detection"]
+        raw_dir = next((p for p in raw_candidates if os.path.exists(os.path.join(p, "train_transaction.csv"))), None)
 
-    # 2. Huấn luyện thử 4 mô hình
+        if raw_dir:
+            print(f"[models.py] Chưa có data/processed. Nạp mẫu dữ liệu THẬT từ {raw_dir} và chạy pipeline...")
+            sys.path.append(".")
+            sys.path.append("src")
+            sys.path.append("../src")
+            from load_data import load_data, time_based_split
+            from preprocessing import (
+                missing_group_split, compute_signal_table, apply_missing_rule,
+                impute_fit, impute_apply, encode_fit, encode_apply,
+                feature_engineering_fit, feature_engineering_apply
+            )
+            df_raw = load_data(raw_dir, nrows=5000)
+            safe_cols, suspect_cols, drop_candidate_cols = missing_group_split(df_raw)
+            signal_df = compute_signal_table(df_raw, suspect_cols + drop_candidate_cols)
+            df_clean, _, _ = apply_missing_rule(df_raw, signal_df, safe_cols)
+            train_df, val_df, test_df = time_based_split(df_clean)
+
+            num_cols = [c for c in train_df.select_dtypes(include=["float64", "float32", "int64", "int32"]).columns if c not in ["isFraud", "TransactionID", "TransactionDT"]]
+            cat_cols = [c for c in train_df.columns if not pd.api.types.is_numeric_dtype(train_df[c]) and c not in ["isFraud", "TransactionID", "TransactionDT"]]
+
+            imp_vals = impute_fit(train_df, num_cols, cat_cols)
+            for s_df in [train_df, val_df, test_df]:
+                impute_apply(s_df, imp_vals, num_cols, cat_cols)
+            encs = encode_fit(train_df, cat_cols)
+            for s_df in [train_df, val_df, test_df]:
+                encode_apply(s_df, encs, cat_cols)
+            c_freq = feature_engineering_fit(train_df)
+            for s_df in [train_df, val_df, test_df]:
+                feature_engineering_apply(s_df, c_freq)
+        else:
+            print("[models.py] Không tìm thấy dữ liệu thật trên máy. Sử dụng dữ liệu giả lập dự phòng...")
+            np.random.seed(42)
+            n_samples = 2000
+            n_features = 20
+            X_mock = pd.DataFrame(np.random.randn(n_samples, n_features), columns=[f"feat_{i}" for i in range(n_features)])
+            y_mock = pd.Series((np.random.rand(n_samples) < 0.035).astype(int), name="isFraud")
+            split_idx = int(n_samples * 0.7)
+            val_idx = int(n_samples * 0.85)
+            train_df = pd.concat([X_mock.iloc[:split_idx], y_mock.iloc[:split_idx]], axis=1)
+            val_df = pd.concat([X_mock.iloc[split_idx:val_idx], y_mock.iloc[split_idx:val_idx]], axis=1)
+            test_df = pd.concat([X_mock.iloc[val_idx:], y_mock.iloc[val_idx:]], axis=1)
+
+    # Tách X, y
+    drop_cols = [c for c in ["TransactionID", "TransactionDT", "isFraud"] if c in train_df.columns]
+    feature_cols = [c for c in train_df.columns if c not in drop_cols]
+
+    X_tr, y_tr = train_df[feature_cols], train_df["isFraud"]
+    X_va, y_va = val_df[feature_cols], val_df["isFraud"]
+    X_te, y_te = test_df[feature_cols], test_df["isFraud"]
+
+    print(f"Dữ liệu huấn luyện: {X_tr.shape}, Số ca gian lận: {y_tr.sum()} ({y_tr.mean():.2%})")
+    print(f"Dữ liệu kiểm thử:   {X_te.shape}, Số ca gian lận: {y_te.sum()} ({y_te.mean():.2%})")
+
+    # 2. Huấn luyện 4 mô hình trên mẫu dữ liệu thật
     lr_model = train_logistic_regression(X_tr, y_tr, max_iter=200)
-    rf_model = train_random_forest(X_tr, y_tr, n_estimators=20, max_depth=5)
-    lgb_model = train_lightgbm(X_tr, y_tr, X_val=X_te, y_val=y_te, n_estimators=30)
-    iso_model = train_isolation_forest(X_tr, y_train=y_tr, n_estimators=20)
+    rf_model = train_random_forest(X_tr, y_tr, n_estimators=30, max_depth=8)
+    lgb_model = train_lightgbm(X_tr, y_tr, X_val=X_va, y_val=y_va, n_estimators=50)
+    iso_model = train_isolation_forest(X_tr, y_train=y_tr, n_estimators=30)
 
-    # 3. So sánh các mô hình
+    # 3. So sánh các mô hình với ngưỡng Youden's J
     models = {
         "Logistic Regression": lr_model,
         "Random Forest": rf_model,
@@ -533,13 +583,13 @@ if __name__ == "__main__":
         "Isolation Forest": iso_model
     }
 
-    comparison = compare_models(models, X_te, y_te, threshold=0.5)
-    print("\nKết quả so sánh sơ bộ:")
+    comparison = compare_models(models, X_te, y_te, threshold="youden")
+    print("\nKết quả so sánh các mô hình trên dữ liệu thật (Ngưỡng Youden's J):")
     print(comparison)
 
-    # 4. Kiểm tra trích xuất đặc trưng
-    top_feats = get_feature_importances(rf_model, list(X_tr.columns), top_n=5)
-    print("\nTop 5 đặc trưng quan trọng của Random Forest:")
+    # 4. Kiểm tra trích xuất đặc trưng quan trọng
+    top_feats = get_feature_importances(rf_model, feature_cols, top_n=5)
+    print("\nTop 5 đặc trưng quan trọng của Random Forest trên dữ liệu thật:")
     print(top_feats)
 
-    print("\n[OK] Toàn bộ module src/models.py đã chạy thành công và hoạt động chính xác!")
+    print("\n[OK] Toàn bộ module src/models.py đã chạy thành công trên DỮ LIỆU THẬT!")
