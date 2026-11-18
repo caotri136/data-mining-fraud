@@ -33,6 +33,7 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
     average_precision_score,
     roc_auc_score,
+    roc_curve,
     accuracy_score,
     confusion_matrix,
 )
@@ -47,30 +48,50 @@ except ImportError:
 
 
 # ==============================================================================
-# 1. HÀM ĐÁNH GIÁ METRIC (EVALUATION METRICS)
+# 1. HÀM ĐÁNH GIÁ METRIC VÀ TÌM NGƯỠNG THỐNG KÊ (EVALUATION & THRESHOLD)
 # ==============================================================================
+
+def find_youden_threshold(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray
+) -> Tuple[float, float]:
+    """
+    Tìm ngưỡng phân loại tối ưu theo chỉ số thống kê Youden's J Statistic từ đường cong ROC:
+        J = Sensitivity + Specificity - 1 = TPR - FPR
+    
+    Ngưỡng tối ưu t* là điểm tại đó khoảng cách thẳng đứng từ ROC tới đường chéo ngẫu nhiên là lớn nhất,
+    giúp cân bằng tối ưu giữa tỷ lệ bắt đúng gian lận (TPR) và việc hạn chế báo động giả (FPR).
+    
+    Trả về:
+        (best_threshold, max_j_score)
+    """
+    y_true = np.asarray(y_true).astype(int)
+    y_pred_proba = np.asarray(y_pred_proba).astype(float)
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred_proba)
+    j_scores = tpr - fpr
+    best_idx = np.argmax(j_scores)
+    best_thresh = float(thresholds[best_idx])
+    # Giới hạn ngưỡng trong khoảng hợp lý [0.01, 0.95]
+    best_thresh = float(np.clip(best_thresh, 0.01, 0.95))
+    return best_thresh, float(j_scores[best_idx])
+
 
 def evaluate_predictions(
     y_true: np.ndarray,
     y_pred_proba: np.ndarray,
-    threshold: float = 0.5
+    threshold: Any = 0.5
 ) -> Dict[str, Any]:
     """
     Tính toán các chỉ số đánh giá toàn diện cho bài toán phát hiện gian lận.
-    
-    Đặc thù gian lận: Tỉ lệ mẫu dương rất thấp (~3.5%), do đó PR-AUC và Recall
-    quan trọng hơn nhiều so với Accuracy.
-
-    Tham số:
-        y_true: Mảng nhãn thực tế (0 hoặc 1)
-        y_pred_proba: Mảng xác suất dự đoán nhãn 1 (từ 0.0 đến 1.0)
-        threshold: Ngưỡng quyết định nhãn 1 (mặc định 0.5)
-
-    Trả về:
-        Dictionary chứa các chỉ số: PR-AUC, ROC-AUC, Precision, Recall, F1, Accuracy, TN, FP, FN, TP
+    Hỗ trợ truyền threshold cụ thể (float) hoặc 'youden' để tự động tối ưu hóa theo Youden's J statistic.
     """
     y_true = np.asarray(y_true).astype(int)
     y_pred_proba = np.asarray(y_pred_proba).astype(float)
+
+    if threshold == "youden" or threshold is None:
+        threshold, _ = find_youden_threshold(y_true, y_pred_proba)
+
+    threshold = float(threshold)
     y_pred = (y_pred_proba >= threshold).astype(int)
 
     precision, recall, f1, _ = precision_recall_fscore_support(
